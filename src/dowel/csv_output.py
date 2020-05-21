@@ -1,6 +1,7 @@
 """A `dowel.logger.LogOutput` for CSV files."""
 import csv
-import warnings
+import tempfile
+# import warnings
 
 from dowel import TabularInput
 from dowel.simple_outputs import FileOutput
@@ -17,8 +18,6 @@ class CsvOutput(FileOutput):
         super().__init__(file_name)
         self._writer = None
         self._fieldnames = None
-        self._warned_once = set()
-        self._disable_warnings = False
 
     @property
     def types_accepted(self):
@@ -42,38 +41,71 @@ class CsvOutput(FileOutput):
                 self._writer.writeheader()
 
             if to_csv.keys() != self._fieldnames:
-                self._warn('Inconsistent TabularInput keys detected. '
-                           'CsvOutput keys: {}. '
-                           'TabularInput keys: {}. '
-                           'Did you change key sets after your first '
-                           'logger.log(TabularInput)?'.format(
-                               set(self._fieldnames), set(to_csv.keys())))
 
-            self._writer.writerow(to_csv)
+                new_keys = set(to_csv.keys()).difference(self._fieldnames)
+                if new_keys:
+                    """ Move to beginning of log file """
+                    self._log_file.seek(0)
+                    reader = csv.DictReader(
+                        self._log_file, 
+                        fieldnames=self._fieldnames)
+
+                    self._fieldnames = self._fieldnames.union(new_keys)
+
+                    """ Write corrected lines with new keyto a temporary file """
+                    temp_file = tempfile.NamedTemporaryFile('w+', dir='.')
+                    temp_writer = csv.DictWriter(
+                        temp_file,
+                        fieldnames=self._fieldnames)
+                    temp_writer.writeheader()
+
+                    """ Skip header """
+                    next(reader)
+                    for row in reader:
+                        for k in new_keys:
+                            row[k] = ''
+                        temp_writer.writerow(row)
+
+                    """ Delete log file contents """
+                    self._log_file.truncate(0)
+                    self._log_file.seek(0)
+
+                    """ Read from temp file and write to log file """
+                    temp_file.seek(0)
+                    temp_reader = csv.DictReader(
+                        temp_file,
+                        fieldnames=self._fieldnames)
+
+                    """ need to update fieldnames """
+                    self._writer = csv.DictWriter(
+                        self._log_file,
+                        fieldnames=self._fieldnames)
+
+                    """ Write headers to log file """
+                    self._writer.writeheader()
+
+                    """ Advance passed headers """
+                    next(temp_reader)
+                    for row in temp_reader:
+                        self._writer.writerow(row)
+
+                    """ Write new entry """
+                    self._writer.writerow(to_csv)
+
+                missing_keys = self._fieldnames.difference(set(to_csv.keys()))
+                if missing_keys:
+                    """ Insert blank values for missing keys """
+                    for k in missing_keys:
+                        to_csv[k] = ''
+                    self._writer.writerow(to_csv)
+
+            else:
+                self._writer.writerow(to_csv)
 
             for k in to_csv.keys():
                 data.mark(k)
+
+            """ Necessary to ensure old values aren't repeated for missing keys """
+            data.clear()
         else:
             raise ValueError('Unacceptable type.')
-
-    def _warn(self, msg):
-        """Warns the user using warnings.warn.
-
-        The stacklevel parameter needs to be 3 to ensure the call to logger.log
-        is the one printed.
-        """
-        if not self._disable_warnings and msg not in self._warned_once:
-            warnings.warn(
-                colorize(msg, 'yellow'), CsvOutputWarning, stacklevel=3)
-        self._warned_once.add(msg)
-        return msg
-
-    def disable_warnings(self):
-        """Disable logger warnings for testing."""
-        self._disable_warnings = True
-
-
-class CsvOutputWarning(UserWarning):
-    """Warning class for CsvOutput."""
-
-    pass
