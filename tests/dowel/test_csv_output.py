@@ -4,8 +4,6 @@ import tempfile
 import pytest
 
 from dowel import CsvOutput, TabularInput
-from dowel.csv_output import CsvOutputWarning
-
 
 class TestCsvOutput:
 
@@ -35,28 +33,6 @@ class TestCsvOutput:
         ]  # yapf: disable
         self.assert_csv_matches(correct)
 
-    def test_record_inconsistent(self):
-        foo = 1
-        bar = 10
-        self.tabular.record('foo', foo)
-        self.csv_output.record(self.tabular)
-        self.tabular.record('foo', foo * 2)
-        self.tabular.record('bar', bar * 2)
-
-        with pytest.warns(CsvOutputWarning):
-            self.csv_output.record(self.tabular)
-
-        # this should not produce a warning, because we only warn once
-        self.csv_output.record(self.tabular)
-
-        self.csv_output.dump()
-
-        correct = [
-            {'foo': str(foo)},
-            {'foo': str(foo * 2)},
-        ]  # yapf: disable
-        self.assert_csv_matches(correct)
-
     def test_empty_record(self):
         self.csv_output.record(self.tabular)
         assert not self.csv_output._writer
@@ -66,24 +42,71 @@ class TestCsvOutput:
         self.tabular.record('foo', foo)
         self.tabular.record('bar', bar)
         self.csv_output.record(self.tabular)
-        assert not self.csv_output._warned_once
+
+        self.csv_output.dump()
+
+        correct = [
+            {'foo': str(foo), 'bar': str(bar)},
+        ]
+
+        self.assert_csv_matches(correct)
 
     def test_unacceptable_type(self):
         with pytest.raises(ValueError):
             self.csv_output.record('foo')
-
-    def test_disable_warnings(self):
+    
+    def test_new_key(self):
         foo = 1
         bar = 10
         self.tabular.record('foo', foo)
         self.csv_output.record(self.tabular)
         self.tabular.record('foo', foo * 2)
         self.tabular.record('bar', bar * 2)
-
-        self.csv_output.disable_warnings()
-
-        # this should not produce a warning, because we disabled warnings
         self.csv_output.record(self.tabular)
+
+        self.csv_output.dump()
+
+        correct = [
+            {'foo': str(foo), 'bar': ''},
+            {'foo': str(foo * 2), 'bar': str(bar * 2)},
+        ]
+        self.assert_csv_matches(correct)
+    
+    def test_missing_key(self):
+        foo = 1
+        bar = 10
+        self.tabular.record('foo', foo)
+        self.tabular.record('bar', bar)
+        self.csv_output.record(self.tabular)
+        self.tabular.record('foo', foo * 2)
+        self.csv_output.record(self.tabular)
+
+        self.csv_output.dump()
+
+        correct = [
+            {'foo': str(foo), 'bar': str(bar)},
+            {'foo': str(foo * 2), 'bar': ''},
+        ]
+        self.assert_csv_matches(correct)
+
+    def test_new_and_missing_keys(self):
+        foo = 1
+        bar = 10
+        baz = 7
+        self.tabular.record('foo', foo)
+        self.tabular.record('bar', bar)
+        self.csv_output.record(self.tabular)
+        self.tabular.record('foo', foo * 2)
+        self.tabular.record('baz', baz * 2)
+        self.csv_output.record(self.tabular)
+
+        self.csv_output.dump()
+
+        correct = [
+            {'foo': str(foo), 'bar': str(bar), 'baz': ''},
+            {'foo': str(foo * 2), 'bar': '', 'baz': str(baz * 2)},
+        ]
+        self.assert_csv_matches(correct)
 
     def assert_csv_matches(self, correct):
         """Check the first row of a csv file and compare it to known values."""
