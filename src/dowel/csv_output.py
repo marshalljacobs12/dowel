@@ -1,7 +1,8 @@
 """A `dowel.logger.LogOutput` for CSV files."""
 import csv
+import os
+import shutil
 import tempfile
-# import warnings
 
 from dowel import TabularInput
 from dowel.simple_outputs import FileOutput
@@ -33,7 +34,7 @@ class CsvOutput(FileOutput):
                 return
 
             if not self._writer:
-                self._fieldnames = set(to_csv.keys())
+                self._fieldnames = list(to_csv.keys())
                 self._writer = csv.DictWriter(
                     self._log_file,
                     fieldnames=self._fieldnames,
@@ -41,71 +42,42 @@ class CsvOutput(FileOutput):
                 self._writer.writeheader()
 
             if to_csv.keys() != self._fieldnames:
-
                 new_keys = set(to_csv.keys()).difference(self._fieldnames)
                 if new_keys:
-                    """ Move to beginning of log file """
+                    # Move to beginning of log file 
                     self._log_file.seek(0)
-                    reader = csv.DictReader(
-                        self._log_file, 
-                        fieldnames=self._fieldnames)
-
-                    self._fieldnames = self._fieldnames.union(new_keys)
-
-                    """ Write corrected lines with new keyto a temporary file """
-                    temp_file = tempfile.NamedTemporaryFile('w+', dir='.')
+                    # self._fieldnames = self._fieldnames.union(new_keys)
+                    self._fieldnames += list(new_keys)
+                    # Write corrected lines with new keyto a temporary file
+                    temp_dir = os.path.dirname(self._log_file.name)
+                    temp_file = tempfile.NamedTemporaryFile('w+', dir=temp_dir)
                     temp_writer = csv.DictWriter(
                         temp_file,
                         fieldnames=self._fieldnames)
                     temp_writer.writeheader()
 
-                    """ Skip header """
-                    next(reader)
-                    for row in reader:
-                        for k in new_keys:
-                            row[k] = ''
-                        temp_writer.writerow(row)
+                    # Skip header and read first line of data into line
+                    self._log_file.readline()
+                    line = self._log_file.readline()
+                    while line:
+                        # don't copy over old newline char and insert \n at end
+                        temp_file.write(line[:-1] + (','*len(new_keys)) + '\n')
+                        line = self._log_file.readline()
 
-                    """ Delete log file contents """
-                    self._log_file.truncate(0)
+                    # Copy from temp file to log file 
                     self._log_file.seek(0)
-
-                    """ Read from temp file and write to log file """
                     temp_file.seek(0)
-                    temp_reader = csv.DictReader(
-                        temp_file,
-                        fieldnames=self._fieldnames)
+                    shutil.copyfileobj(temp_file, self._log_file)
+                    temp_file.close()
 
-                    """ need to update fieldnames """
-                    self._writer = csv.DictWriter(
-                        self._log_file,
-                        fieldnames=self._fieldnames)
-
-                    """ Write headers to log file """
-                    self._writer.writeheader()
-
-                    """ Advance passed headers """
-                    next(temp_reader)
-                    for row in temp_reader:
-                        self._writer.writerow(row)
-
-                    """ Write new entry """
-                    self._writer.writerow(to_csv)
-
-                missing_keys = self._fieldnames.difference(set(to_csv.keys()))
-                if missing_keys:
-                    """ Insert blank values for missing keys """
-                    for k in missing_keys:
-                        to_csv[k] = ''
-                    self._writer.writerow(to_csv)
-
-            else:
-                self._writer.writerow(to_csv)
+            # fieldnames have been updated if necessary in if. Handles missing
+            # fieldnames with default restval=''
+            self._writer.writerow(to_csv)
 
             for k in to_csv.keys():
                 data.mark(k)
 
-            """ Necessary to ensure old values aren't repeated for missing keys """
+            # Necessary to ensure old values aren't repeated for missing keys
             data.clear()
         else:
             raise ValueError('Unacceptable type.')
